@@ -5,7 +5,6 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
-import android.view.MotionEvent
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.google.ar.core.*
@@ -18,9 +17,7 @@ import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
     private lateinit var arFragment: ArFragment
-    private var arSession: Session? = null
     private var tigerRenderable: ModelRenderable? = null
-    private var transformableNode: TransformableNode? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,8 +41,17 @@ class MainActivity : AppCompatActivity() {
             }
 
         arFragment = supportFragmentManager.findFragmentById(R.id.arFragment) as ArFragment
-        arFragment.setOnTapArPlaneListener { hitResult, plane, motionEvent ->
-            placeObject(hitResult, motionEvent)
+        arFragment.instructionsController.isEnabled = false
+        arFragment.setOnTapArPlaneListener { hitResult, _, _ ->
+            arFragment.arSceneView.scene.addChild(AnchorNode(hitResult.createAnchor()).apply {
+                // Create the transformable model and add it to the anchor
+                localScale = Vector3(0.5f, 0.5f, 0.5f)
+                addChild(TransformableNode(arFragment.transformationSystem).apply {
+                    renderable = tigerRenderable
+                    renderableInstance.animate(true).start()
+                    select()
+                })
+            })
         }
         arFragment.arSceneView.scene?.addOnUpdateListener {
             val frame = arFragment.arSceneView.arFrame ?: run {
@@ -68,22 +74,11 @@ class MainActivity : AppCompatActivity() {
                 logE("OnUpdate: " + updatedImages.joinToString(separator = " + ") { it.name })
             }
         }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        arSession?.pause()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        if (arSession == null) {
-            arSession = Session(applicationContext)
-            val config = Config(arSession)
+        arFragment.setOnSessionConfigurationListener { session, config ->
             try {
                 val customImageDatabase = config.augmentedImageDatabase.takeIf {
                     it.numImages > 0
-                } ?: AugmentedImageDatabase(arSession)
+                } ?: AugmentedImageDatabase(session)
                 imageModelList.forEach {
                     customImageDatabase.addImage(
                         it.name,
@@ -93,61 +88,15 @@ class MainActivity : AppCompatActivity() {
                 }
                 config.apply {
                     augmentedImageDatabase = customImageDatabase
+                    if (session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) {
+                        depthMode = Config.DepthMode.AUTOMATIC
+                    }
                     updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
-                    focusMode = Config.FocusMode.AUTO
-                    depthMode = Config.DepthMode.AUTOMATIC
                 }
             } catch (exception: Exception) {
                 logE(exception.message)
             }
-            arSession?.configure(config)
-            arFragment.arSceneView.setupSession(arSession)
         }
-        arSession?.resume()
-    }
-
-    private fun placeObject(hitResult: HitResult, tap: MotionEvent?) {
-//        val frame: Frame = arFragment.getArSceneView().getArFrame() ?: return
-        // Calculate the ray from the user's device into the world.
-//        val tap: MotionEvent = arFragment.getArSceneView().getArFrame().getAndroidHardwareBuffer().get()
-        if (tap == null) return
-        if (tigerRenderable == null) return
-        if (transformableNode != null) return
-        logE("Scene on touch")
-//            val ray: Ray = arFragment.getArSceneView().getScene().getCamera().screenPointToRay(
-//                tap.x,
-//                tap.y,
-//                displayMetrics.widthPixels,
-//                displayMetrics.heightPixels
-//            )
-        // Get the point in the world where the ray intersected a plane.
-//            val frame = arFragment.arSceneView.arFrame ?: return
-//            val hitResultList = frame.hitTestInstantPlacement(tap.x, tap.y, 2f)
-//            logE("Hit result list = " + hitResultList.size)
-//            val hitResult = hitResultList.firstOrNull { hit ->
-//                    when (val trackable = hit.trackable) {
-//                        is Plane -> trackable.isPoseInPolygon(hit.hitPose) && calculateDistanceToPlane(hit.hitPose, frame.camera.pose) > 0
-//                        is Point -> trackable.orientationMode == Point.OrientationMode.ESTIMATED_SURFACE_NORMAL
-//                        is InstantPlacementPoint -> true
-//                        // DepthPoints are only returned if Config.DepthMode is set to AUTOMATIC.
-//                        is DepthPoint -> true
-//                        else -> false
-//                    }
-//                } ?: return
-        val anchorNode = AnchorNode(hitResult.createAnchor()).apply {
-            localScale = Vector3(0.1f, 0.1f, 0.1f)
-            setParent(arFragment.arSceneView.scene)
-        }
-        transformableNode = TransformableNode(arFragment.transformationSystem).apply {
-            setParent(anchorNode)
-            renderable = tigerRenderable
-            select()
-        }
-
-//        val filamentAsset: FilamentAsset = model.getRenderableInstance().getFilamentAsset()
-//        if (filamentAsset.animator.animationCount > 0) {
-//            animators.add(com.google.ar.sceneform.samples.gltf.GltfActivity.AnimationInstance(filamentAsset.animator, 0, System.nanoTime()))
-//        }
     }
 
     private fun checkIsSupportedDeviceOrFinish(): Boolean {
